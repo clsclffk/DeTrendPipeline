@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: raw_data_source  # dbt 내에서 부를 이름
+    database: de-trend-pipeline  # 프로젝트 ID
+    schema: raw_data  # Dataset ID
+    tables:
+      - name: github_repos  # 실제 BigQuery에 있는 외부 테이블 이름

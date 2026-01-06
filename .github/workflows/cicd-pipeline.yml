@@ -1,0 +1,176 @@
+name: "CI/CD: Data Pipeline Build & Deploy"
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'dbt/**'
+      - '.github/workflows/cicd-pipeline.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'dbt/**'
+      - 'scripts/**'
+      - 'airflow/dags/**'
+      - '.github/workflows/cicd-pipeline.yml'
+  workflow_dispatch:
+
+jobs:
+  # test 
+  # dbt test로 모델 및 데이터 품질 검증 
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      test_result: ${{ steps.dbt_test.outcome }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dbt
+        run: |
+          pip install dbt-core dbt-bigquery
+
+      - name: Setup GCP credentials
+        run: |
+          echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp_key.json
+
+      - name: Install dbt dependencies
+        run: |
+          cd dbt
+          dbt deps --profiles-dir . --target ci
+
+      - name: Run dbt tests
+        id: dbt_test
+        continue-on-error: true
+        run: |
+          cd dbt
+          dbt test --profiles-dir . --target ci
+
+      - name: Cleanup credentials
+        if: always()
+        run: |
+          rm -f /tmp/gcp_key.json
+
+  # deploy
+  # dbt run으로 BigQuery에 데이터 모델 반영
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: de-trend-pipeline
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dbt
+        run: |
+          pip install dbt-core dbt-bigquery
+
+      - name: Setup GCP credentials for dbt
+        run: |
+          echo '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp_key.json
+
+      - name: Install dbt dependencies
+        run: |
+          cd dbt
+          dbt deps --profiles-dir . --target ci
+
+      - name: Run dbt models
+        id: dbt_run
+        continue-on-error: true
+        run: |
+          cd dbt
+          dbt run --profiles-dir . --target ci
+
+      - name: Sync to Cloud Composer
+        if: steps.dbt_run.outcome == 'success'
+        run: |
+          gcloud storage cp -r dbt gs://asia-northeast3-de-trend-pi-275fe2e9-bucket/dags/
+          gcloud storage cp -r scripts gs://asia-northeast3-de-trend-pi-275fe2e9-bucket/dags/
+          gcloud storage cp airflow/dags/github_trend_pipeline.py gs://asia-northeast3-de-trend-pi-275fe2e9-bucket/dags/
+
+      - name: Cleanup credentials
+        if: always()
+        run: |
+          rm -f /tmp/gcp_key.json
+
+  # notify
+  # slack으로 최종 결과 알림 전송
+  notify:
+    if: always()
+    needs: [test, deploy]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Determine overall status
+        id: status
+        run: |
+          if [ "${{ needs.test.outputs.test_result }}" == "success" ]; then
+            if [ "${{ needs.deploy.result }}" == "success" ] || [ "${{ needs.deploy.result }}" == "skipped" ]; then
+              echo "status=success" >> $GITHUB_OUTPUT
+            else
+              echo "status=failure" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Slack notification
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "${{ steps.status.outputs.status == 'success' && 'dbt Pipeline Success' || 'dbt Pipeline Failed' }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "${{ steps.status.outputs.status == 'success' && ':white_check_mark: *dbt pipeline completed*' || ':x: *dbt pipeline failed*' }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Event:*\n${{ github.event_name }}" },
+                    { "type": "mrkdwn", "text": "*Branch:*\n${{ github.ref_name }}" },
+                    { "type": "mrkdwn", "text": "*Test:*\n${{ needs.test.outputs.test_result }}" },
+                    { "type": "mrkdwn", "text": "*Deploy:*\n${{ needs.deploy.result }}" }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": { "type": "plain_text", "text": "View Logs" },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

@@ -1,0 +1,63 @@
+version: 2
+
+models:
+  - name: stg_github_repos
+    description: "원본 데이터 정제 및 중복 제거"
+    columns:
+      - name: repo_id
+        description: "레포지토리 고유 ID"
+        tests:
+          - not_null
+          - unique:
+              where: "execution_date = CURRENT_DATE()"
+              
+      - name: execution_date
+        description: "데이터 수집 날짜"
+        tests:
+          - not_null
+          
+      - name: keyword
+        description: "검색 키워드"
+        tests:
+          - not_null
+          - accepted_values:
+              # values: ['airflow', 'dagster', 'prefect', 'spark', 'flink', 
+              #          'kafka', 'data-lake', 'data-warehouse', 'lakehouse', 
+              #          'iceberg', 'delta-lake', 'dbt', 'bigquery']
+              # CI/CD 의도적 에러 발생
+              values: ['dagster', 'prefect', 'spark']
+              quote: true
+
+      - name: stars
+        description: "스타 개수"
+        tests:
+          - not_null
+
+  - name: fct_github_trends
+    description: "분석용 최종 테이블"
+    columns:
+      - name: repo_id
+        description: "레포지토리 고유 ID"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_github_repos')
+              field: repo_id
+              
+      - name: full_name
+        description: "레포지토리 전체 이름"
+        tests:
+          - not_null
+          
+      - name: star_rank
+        description: "키워드 내 스타 수 순위 (1~100)"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 1
+              max_value: 100
+              
+      - name: execution_date
+        description: "데이터 수집 날짜"
+        tests:
+          - not_null

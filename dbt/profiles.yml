@@ -1,0 +1,23 @@
+github_trend:  # # profile 이름 
+  outputs:
+    dev:  # 로컬 개발 환경 
+      type: bigquery  # dbt가 BigQuery에 연결
+      method: oauth
+      project: de-trend-pipeline
+      dataset: analytics
+      location: asia-northeast3
+      threads: 4
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1  # 네트워크 오류 대비용
+    
+    ci:  # CI/CD용 환경
+      type: bigquery
+      method: service-account
+      project: de-trend-pipeline
+      dataset: analytics
+      location: asia-northeast3
+      threads: 4
+      keyfile: /tmp/gcp_key.json
+      
+  target: dev  # 기본 환경 
