@@ -21,11 +21,11 @@ models:
         tests:
           - not_null
           - accepted_values:
-              # values: ['airflow', 'dagster', 'prefect', 'spark', 'flink', 
-              #          'kafka', 'data-lake', 'data-warehouse', 'lakehouse', 
-              #          'iceberg', 'delta-lake', 'dbt', 'bigquery']
+              values: ['airflow', 'dagster', 'prefect', 'spark', 'flink', 
+                       'kafka', 'data-lake', 'data-warehouse', 'lakehouse', 
+                       'iceberg', 'delta-lake', 'dbt', 'bigquery']
               # CI/CD 의도적 에러 발생
-              values: ['dagster', 'prefect', 'spark']
+              # values: ['dagster', 'prefect', 'spark']
               quote: true
 
       - name: stars
